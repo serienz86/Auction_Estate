@@ -1,9 +1,9 @@
 import json, os, re
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 from playwright.sync_api import sync_playwright
 
-TODAY = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+KST = timezone(timedelta(hours=9))
+TODAY = datetime.now(KST).strftime("%Y-%m-%d")
 URL = "https://www.courtauction.go.kr"
 TARGETS = [("서울특별시", None)] + [("경기도", g) for g in
           ["성남시", "하남시", "광주시", "용인시", "이천시", "여주시", "양평군"]]
@@ -95,7 +95,7 @@ def main():
             old[x["no"]] = x.get("reg")
     for k, it in found.items():
         it["reg"] = old.get(k) or TODAY
-    json.dump({"updated": datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M"),
+    json.dump({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
                "items": list(found.values())},
               open("data.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("저장", len(found))
