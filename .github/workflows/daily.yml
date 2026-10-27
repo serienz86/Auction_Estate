@@ -17,7 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python --version
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --prefer-binary -r requirements.txt
       - run: python -m playwright install chromium
       - run: python scrape.py
       - uses: actions/upload-artifact@v4
