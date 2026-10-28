@@ -25,11 +25,33 @@ def pick(page, label, option):
         .first.select_option(label=option)
 
 
+def close_popups(page):
+    """공지 팝업(w2popup_window)이 메뉴를 가리므로 닫거나 제거"""
+    for _ in range(6):
+        pops = page.locator(".w2popup_window:visible")
+        if pops.count() == 0:
+            break
+        pop = pops.first
+        btn = pop.get_by_text(re.compile("닫기|오늘.*열지")).or_(
+            pop.locator("[class*='close' i], [id*='close' i]")).first
+        try:
+            btn.click(timeout=2000)
+        except Exception:
+            page.evaluate("document.querySelectorAll("
+                          "'.w2popup_window, [class*=w2window_modal], .w2modal_popup')"
+                          ".forEach(e => e.remove())")
+        page.wait_for_timeout(300)
+
+
 def search(page, sido, sigungu):
     """★ 사이트 구조에 맞춰 고쳐야 하는 부분. debug/ 스크린샷·HTML을 보고 수정하세요."""
     page.goto(URL, wait_until="networkidle")
+    page.wait_for_timeout(1500)
+    close_popups(page)
     page.get_by_text("물건상세검색").first.click()
     page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
+    close_popups(page)
     pick(page, "소재지", sido)
     if sigungu:
         pick(page, "시군구", sigungu)
