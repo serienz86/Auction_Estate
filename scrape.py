@@ -19,12 +19,6 @@ def dump(page, name):
         print("dump fail", e)
 
 
-def pick(page, label, option):
-    """라벨 글자 뒤에 나오는 첫 select에서 option 선택"""
-    page.locator(f"xpath=//*[contains(normalize-space(text()),'{label}')]/following::select[1]") \
-        .first.select_option(label=option)
-
-
 def close_popups(page):
     """공지 팝업(w2popup_window)이 메뉴를 가리므로 닫거나 제거"""
     for _ in range(6):
@@ -43,8 +37,49 @@ def close_popups(page):
         page.wait_for_timeout(300)
 
 
-def search(page, sido, sigungu):
-    """★ 사이트 구조에 맞춰 고쳐야 하는 부분. debug/ 스크린샷·HTML을 보고 수정하세요."""
+def sel_opts(el):
+    return el.evaluate("e => [...e.options].map(o => o.text.trim())")
+
+
+def find_sel(page, match):
+    """옵션 내용으로 select를 찾는다 → (select, 일치 옵션 목록)"""
+    sels = page.locator("select")
+    for i in range(sels.count()):
+        el = sels.nth(i)
+        try:
+            if not el.is_visible():
+                continue
+            hits = [t for t in sel_opts(el) if t and match(t)]
+        except Exception:
+            continue
+        if hits:
+            return el, hits
+    return None, []
+
+
+def pick(page, match, label=None):
+    el, hits = find_sel(page, match)
+    if el is None:
+        raise Exception("select를 찾지 못함")
+    el.select_option(label=label or hits[0])
+    page.wait_for_timeout(900)
+    return hits
+
+
+def dump_selects(page, name):
+    lines = []
+    sels = page.locator("select")
+    for i in range(sels.count()):
+        el = sels.nth(i)
+        try:
+            lines.append(f"{el.get_attribute('id')} | {el.get_attribute('title')} | "
+                         f"visible={el.is_visible()} | {sel_opts(el)[:15]}")
+        except Exception as e:
+            lines.append(f"{i} err {e}")
+    open(f"debug/{name}.txt", "w", encoding="utf-8").write("\n".join(lines))
+
+
+def open_search(page):
     page.goto(URL, wait_until="networkidle")
     page.wait_for_timeout(1500)
     close_popups(page)
@@ -52,12 +87,21 @@ def search(page, sido, sigungu):
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(1000)
     close_popups(page)
-    pick(page, "소재지", sido)
-    if sigungu:
-        pick(page, "시군구", sigungu)
-    pick(page, "용도", "아파트")
-    page.get_by_role("button", name="검색").first.click()
+
+
+def set_usage(page):
+    """용도: 건물 > 주거용건물 > 아파트 (있는 단계만 시도)"""
+    for want in ("건물", "주거용건물", "아파트"):
+        try:
+            pick(page, lambda t, w=want: t == w)
+        except Exception as e:
+            print("용도 단계 건너뜀:", want, e)
+
+
+def run_search(page):
+    page.get_by_role("button", name=re.compile(r"^\s*검색\s*$")).first.click()
     page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
 
 
 def parse(page):
@@ -90,21 +134,41 @@ def main():
     with sync_playwright() as p:
         b = p.chromium.launch()
         page = b.new_context(locale="ko-KR", viewport={"width": 1400, "height": 1000}).new_page()
-        for i, (sido, sg) in enumerate(TARGETS):
+        n_run = 0
+        for sido, key in TARGETS:
             try:
-                search(page, sido, sg)
-                for n in range(MAX_PAGES):
-                    for it in parse(page):
-                        found[it["no"]] = it
-                    nxt = page.get_by_role("link", name="다음").first
-                    if not nxt.count() or not nxt.is_enabled():
-                        break
-                    nxt.click()
-                    page.wait_for_load_state("networkidle")
-                dump(page, f"ok_{i}")
+                open_search(page)
+                dump_selects(page, f"selects_{n_run}_open")
+                skey = "서울" if sido.startswith("서울") else "경기"
+                pick(page, lambda t, k=skey: t in (k, k + "도", k + "특별시"))
+                names = [None]
+                if key:
+                    _, names = find_sel(page, lambda t, k=key: k in t)
+                    names = names or []
+                    print(sido, key, "시군구 옵션:", names)
+                for nm in names:
+                    n_run += 1
+                    try:
+                        if nm:
+                            pick(page, lambda t, x=nm: t == x)
+                        set_usage(page)
+                        dump_selects(page, f"selects_{n_run}")
+                        run_search(page)
+                        for _ in range(MAX_PAGES):
+                            for it in parse(page):
+                                found[it["no"]] = it
+                            nxt = page.get_by_role("link", name="다음").first
+                            if not nxt.count() or not nxt.is_enabled():
+                                break
+                            nxt.click()
+                            page.wait_for_load_state("networkidle")
+                        dump(page, f"ok_{n_run}")
+                    except Exception as e:
+                        print("실패", sido, nm, e)
+                        dump(page, f"err_{n_run}")
             except Exception as e:
-                print("실패", sido, sg, e)
-                dump(page, f"err_{i}")
+                print("실패", sido, key, e)
+                dump(page, f"err_open_{n_run}")
         b.close()
 
     if not found:
